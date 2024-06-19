@@ -1,5 +1,6 @@
 #include "control_center.h"
 
+// Metodo per inviare istruzioni ai droni per seguire le rotte specificate
 void ControlCenter::sendInstructions(const std::vector<std::tuple<int, std::pair<double, double>, std::pair<double, double>>>& routes) {
     PGconn* conn = PQconnectdb("dbname=dronelogdb user=droneuser password=dronepassword hostaddr=127.0.0.1 port=5432");
     if (PQstatus(conn) != CONNECTION_OK) {
@@ -20,10 +21,9 @@ void ControlCenter::sendInstructions(const std::vector<std::tuple<int, std::pair
             continue;
         }
         int idleCount;
-        try{
+        try {
             idleCount = std::stoi(PQgetvalue(res, 0, 0));
-        }
-        catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument& e) {
             std::cerr << "Invalid idle count: " << idleCount << std::endl;
             continue;
         }
@@ -38,6 +38,7 @@ void ControlCenter::sendInstructions(const std::vector<std::tuple<int, std::pair
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+        
         // Ottenere gli ID dei droni in stato idle
         res = PQexec(conn, "SELECT drone_id FROM drone WHERE status = 'idle' AND drone_id != 'drone_0'");
         if (PQresultStatus(res) != PGRES_TUPLES_OK) {
@@ -51,12 +52,13 @@ void ControlCenter::sendInstructions(const std::vector<std::tuple<int, std::pair
         }
         if (res) PQclear(res);
 
-        
+        // Controllo che ci siano abbastanza droni per le rotte
         if (droneIds.size() < routes.size()) {
             std::cerr << "DronesIds < RoutesIds" << std::endl;
             continue;
         }
-        
+
+        // Invio delle rotte ai droni
         std::cout << "Starting sending routes...\n" << std::endl;
         for (size_t i = 0; i < routes.size(); ++i) {
             c++;
@@ -72,7 +74,8 @@ void ControlCenter::sendInstructions(const std::vector<std::tuple<int, std::pair
     PQfinish(conn);
 }
 
-void ControlCenter::heartbeat(){
+// Metodo per gestire il segnale di heartbeat per verificare la connessione con i droni
+void ControlCenter::heartbeat() {
     redisContext* context = redisConnect("127.0.0.1", 6379);
     if (context == nullptr || context->err) {
         if (context) {
@@ -92,12 +95,13 @@ void ControlCenter::heartbeat(){
     freeReplyObject(reply);
 
     while (true) {
-        redisGetReply(context, (void**)&reply);
+        redisGetReply(context, (void**)&reply); // Attende il messaggio di heartbeat
         if (reply == nullptr) {
             std::cerr << "Error: command failed" << std::endl;
             break;
         }
 
+        // Verifica se il messaggio ricevuto è un heartbeat e risponde di conseguenza
         if (reply->type == REDIS_REPLY_ARRAY && reply->elements == 3 && std::string(reply->element[2]->str) == "heartbeat") {
             std::string responseMessage = "Control_center";
             redisContext* pubContext = redisConnect("127.0.0.1", 6379);
@@ -120,12 +124,13 @@ void ControlCenter::heartbeat(){
             if (pubContext) redisFree(pubContext);
         }
 
-        if (reply) freeReplyObject(reply);
+        if (reply) freeReplyObject(reply); // Libera la memoria del messaggio ricevuto
     }
 
-    if (context) redisFree(context);
+    if (context) redisFree(context); // Libera la connessione a Redis
 }
 
+// Metodo per inviare l'istruzione di creazione di un nuovo drone
 void ControlCenter::sendCreateInstruction(const std::string& type) {
     redisContext* context = redisConnect("127.0.0.1", 6379);
     char channel[] = "instruction_channel";
@@ -152,6 +157,7 @@ void ControlCenter::sendCreateInstruction(const std::string& type) {
     if (context) redisFree(context);
 }
 
+// Metodo per inviare l'istruzione di seguire una rotta a un drone specifico
 void ControlCenter::sendRouteInstruction(const std::string& type, const std::string& droneId, const std::tuple<int, std::pair<double, double>, std::pair<double, double>>& route) {
     redisContext* context = redisConnect("127.0.0.1", 6379);
     char channel[] = "instruction_channel";
@@ -184,6 +190,7 @@ void ControlCenter::sendRouteInstruction(const std::string& type, const std::str
     if (context) redisFree(context);
 }
 
+// Metodo per inviare l'istruzione di ricarica a un drone specifico
 void ControlCenter::sendRechargeInstruction(const std::string& droneId, const std::pair<double, double>& destination, int routeId) {
     redisContext* context = redisConnect("127.0.0.1", 6379);
     char channel[] = "instruction_channel";
@@ -211,10 +218,12 @@ void ControlCenter::sendRechargeInstruction(const std::string& droneId, const st
     if (context) redisFree(context);
 }
 
+// Metodo per inviare un drone a seguire una rotta specifica
 void ControlCenter::sendDroneOnRoute(const std::tuple<int, std::pair<double, double>, std::pair<double, double>>& route, const std::string& droneId) {
     sendRouteInstruction("follow_route", droneId, route);
 }
 
+// Metodo per ricevere lo stato dei droni da Redis
 void ControlCenter::receiveStatus() {
     redisContext* context = redisConnect("127.0.0.1", 6379);
     char channel[] = "drone_status";
@@ -242,7 +251,7 @@ void ControlCenter::receiveStatus() {
     int c = 0;
     while (true) {
         c++;
-        if (reply){
+        if (reply) {
             freeReplyObject(reply);
         }
         redisGetReply(context, (void**)&reply);
@@ -251,6 +260,7 @@ void ControlCenter::receiveStatus() {
             break;
         }
 
+        // Processo per elaborare i messaggi di stato dei droni
         if (reply->type == REDIS_REPLY_ARRAY && reply->elements == 3 && reply->element[2]->str != nullptr) {
             try {
                 std::string statusMessage(reply->element[2]->str);
@@ -272,36 +282,35 @@ void ControlCenter::receiveStatus() {
 
                 updateDroneStatus(droneId, status, batterySeconds, posX, posY);
 
-                if (c == 500) {
-                    // printMap(droneStatuses);
+                if (c == 500000) {
+                    printMap(droneStatuses);
                     c = 0;
                 }
 
+                // Se il drone è pronto, invia l'istruzione di ricarica
                 if (status == "ready") {
                     routeIds[routeId] = std::chrono::system_clock::now();
                     logs.emplace_back(id, routeId, std::chrono::system_clock::now());
                     sendRechargeInstruction(droneId, {3.0, 3.0}, 0);
                 }
-            } 
-            catch(const std::invalid_argument& e){
-                std::cerr<<"Invalid argument: " << e.what() << std::endl;
-            }
-            catch (const std::exception& e) {
+            } catch (const std::invalid_argument& e) {
+                std::cerr << "Invalid argument: " << e.what() << std::endl;
+            } catch (const std::exception& e) {
                 std::cerr << "Exception: " << e.what() << std::endl;
             }
-            
         }
     }
-    if (reply){
+    if (reply) {
         freeReplyObject(reply);
     }
-    if (context){
+    if (context) {
         redisFree(context);
     }
 }
 
+// Metodo per aggiornare il database con i log e gli stati delle rotte
 void ControlCenter::updateDatabase() {
-    std::this_thread::sleep_for(std::chrono::seconds(60));
+    std::this_thread::sleep_for(std::chrono::seconds(60)); // Aspetta 60 secondi prima di iniziare l'aggiornamento
     while (true) {
         PGconn* conn = PQconnectdb("dbname=dronelogdb user=droneuser password=dronepassword hostaddr=127.0.0.1 port=5432");
         if (PQstatus(conn) != CONNECTION_OK) {
@@ -310,14 +319,14 @@ void ControlCenter::updateDatabase() {
             return;
         }
 
-        // Update routes table
+        // Aggiorna la tabella delle rotte
         std::string updateQuery = "BEGIN; "; // Inizia una transazione
 
         for (const auto& route : routeIds) {
             int routeId = route.first;
             std::time_t visitedTime = std::chrono::system_clock::to_time_t(route.second);
             std::string visitedTimeStr = std::to_string(visitedTime);
-            
+
             updateQuery += "UPDATE routes SET visited = true, visited_time = to_timestamp(" + visitedTimeStr + ") WHERE id = " + std::to_string(routeId) + "; ";
         }
 
@@ -329,7 +338,7 @@ void ControlCenter::updateDatabase() {
         }
         if (res) PQclear(res);
 
-        // Update drone_logs table
+        // Aggiorna la tabella dei log dei droni
         std::string insertLogsQuery = "BEGIN; "; // Inizia una transazione
 
         for (const auto& log : logs) {
@@ -354,25 +363,29 @@ void ControlCenter::updateDatabase() {
 
         PQfinish(conn);
         std::cout << "Update database finished" << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(60));
+        std::this_thread::sleep_for(std::chrono::seconds(60)); // Aspetta 60 secondi prima di effettuare il prossimo aggiornamento
     }
 }
 
+// Metodo per calcolare la distanza tra una posizione e la base
 double ControlCenter::calculateDistanceToBase(double x, double y) {
     double baseX = 3.0;
     double baseY = 3.0;
     return sqrt(pow(baseX - x, 2) + pow(baseY - y, 2));
 }
 
+// Metodo per calcolare il tempo necessario per raggiungere la base
 double ControlCenter::calculateTimeToBase(double distance) {
     double speed = 30.0 / 3600.0; // 30 km/h in km/s
     return distance / speed;
 }
 
+// Metodo per aggiornare lo stato del drone
 void ControlCenter::updateDroneStatus(const std::string& droneId, const std::string& status, int batterySeconds, double posX, double posY) {
     droneStatuses[droneId] = std::make_tuple(status, batterySeconds, posX, posY); 
 }
 
+// Metodo per estrarre il numero del drone dall'ID
 int ControlCenter::extractDroneNumber(const std::string& droneId) {
     size_t pos = droneId.find('_');
     if (pos != std::string::npos) {
@@ -381,6 +394,7 @@ int ControlCenter::extractDroneNumber(const std::string& droneId) {
     return -1;
 }
 
+// Metodo per stampare la mappa degli stati dei droni
 void ControlCenter::printMap(const std::unordered_map<std::string, std::tuple<std::string, int, double, double>>& map) {
     std::vector<std::pair<std::string, std::tuple<std::string, int, double, double>>> vec(map.begin(), map.end());
 
@@ -399,3 +413,4 @@ void ControlCenter::printMap(const std::unordered_map<std::string, std::tuple<st
     }
     std::cout << "-----------------------------------------------------------\n" << std::endl;
 }
+    

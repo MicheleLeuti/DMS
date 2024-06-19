@@ -1,5 +1,6 @@
 #include "drone.h"
 
+// Inizializzazione delle variabili statiche di classe
 int Drone::nextId = 1;
 std::unordered_map<int, std::shared_ptr<Drone>> Drone::drones;
 int inMission = 0;
@@ -11,9 +12,12 @@ int charging = 0;
 int wind = 0;
 double weather = 0;
 
-Drone::Drone(int id, int life) : droneId(id), posX(3.0), posY(3.0), batterySeconds(1800000), status("idle"), life(life){}
+// Costruttore della classe Drone che inizializza gli attributi del drone
+Drone::Drone(int id, int life) : droneId(id), posX(3.0), posY(3.0), batterySeconds(1800000), status("idle"), life(life) {}
 
+// Metodo per avviare i thread per ogni drone
 void Drone::startThreads() {
+    // Se l'ID del drone è 0, avvia i thread specifici per il drone principale
     if (droneId == 0) {
         std::thread(&Drone::sendStatus, this).detach();
         std::thread(&Drone::printStatus, this).detach();
@@ -22,38 +26,48 @@ void Drone::startThreads() {
         std::thread(&Drone::changeConditions, this).detach();
         std::thread(&Drone::heartbeat, this).detach();
     } else {
+        // Per gli altri droni, avvia solo il thread per ricevere istruzioni
         std::thread(&Drone::receiveInstruction, this).detach();
     }
 }
 
-void Drone::changeConditions(){
-    while(true){
+// Metodo per cambiare le condizioni del vento e del tempo in modo casuale
+void Drone::changeConditions() {
+    while (true) {
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<> dis(-3, 3);
-        wind = dis(gen);
+        wind = dis(gen); // Cambia casualmente la velocità del vento
+
         std::uniform_int_distribution<> dis1(0, 2);
         int var = dis1(gen);
         if (var == 0) weather = 1;
         if (var == 1) weather = 0.5;
         if (var == 2) weather = 0.1;
+
+        // Determina la condizione meteo in base al valore generato
         std::string w = "";
         if (weather == 1) w = "sunny";
         if (weather == 0.5) w = "rainy";
         if (weather == 0.1) w = "foggy";
-        std::cout<< "Changed parameters, wind: " << wind << " weather: " << w << std::endl;
-        std::this_thread::sleep_for(std::chrono::minutes(1));
+
+        std::cout << "Changed parameters, wind: " << wind << " weather: " << w << std::endl;
+        std::this_thread::sleep_for(std::chrono::minutes(1)); // Aspetta un minuto prima di cambiare nuovamente le condizioni
     }
 }
 
-void Drone::printStatus(){
-    while(true){
-        std::cout << "#idle: "<< idle << " #inMission: "<< inMission << " #ready: "<< ready << " #toBase: "<< toBase << " #recharge: "<< charging << " #broken: " << broken <<"\n" <<std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+// Metodo per stampare lo stato corrente dei droni
+void Drone::printStatus() {
+    while (true) {
+        // Stampa il numero di droni in ciascuno stato
+        std::cout << "#idle: " << idle << " #inMission: " << inMission << " #ready: " << ready << " #toBase: " << toBase << " #recharge: " << charging << " #broken: " << broken << "\n" << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10000)); // Aspetta 10 secondi prima di stampare di nuovo
     }
 }
 
+// Metodo per gestire il segnale di heartbeat per verificare la connessione con il sistema
 void Drone::heartbeat() {
+    // Connessione a Redis
     redisContext* context = redisConnect("127.0.0.1", 6379);
     if (context == nullptr || context->err) {
         if (context) {
@@ -64,6 +78,7 @@ void Drone::heartbeat() {
         return;
     }
 
+    // Iscrizione al canale heartbeat
     redisReply* reply = (redisReply*)redisCommand(context, "SUBSCRIBE %s", "heartbeat_channel");
     if (reply == nullptr) {
         std::cerr << "Error: cannot subscribe to heartbeat_channel" << std::endl;
@@ -73,12 +88,13 @@ void Drone::heartbeat() {
     freeReplyObject(reply);
 
     while (true) {
-        redisGetReply(context, (void**)&reply);
+        redisGetReply(context, (void**)&reply); // Attende il messaggio di heartbeat
         if (reply == nullptr) {
             std::cerr << "Error: command failed" << std::endl;
             break;
         }
 
+        // Verifica se il messaggio ricevuto è un heartbeat e risponde di conseguenza
         if (reply->type == REDIS_REPLY_ARRAY && reply->elements == 3 && std::string(reply->element[2]->str) == "heartbeat") {
             std::string responseMessage = "drone";
             redisContext* pubContext = redisConnect("127.0.0.1", 6379);
@@ -101,14 +117,15 @@ void Drone::heartbeat() {
             if (pubContext) redisFree(pubContext);
         }
 
-        if (reply) freeReplyObject(reply);
+        if (reply) freeReplyObject(reply); // Libera la memoria del messaggio ricevuto
     }
 
-    if (context) redisFree(context);
+    if (context) redisFree(context); // Libera la connessione a Redis
 }
 
+// Metodo per aggiornare il database con le informazioni correnti dei droni
 void Drone::updateDatabase(const std::unordered_map<int, std::shared_ptr<Drone>>& drones) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5000)); // Attende 5 secondi prima di iniziare gli aggiornamenti
     PGconn* conn = PQconnectdb("dbname=dronelogdb user=droneuser password=dronepassword hostaddr=127.0.0.1 port=5432");
     if (PQstatus(conn) != CONNECTION_OK) {
         std::cerr << "Connection to database failed: " << PQerrorMessage(conn) << std::endl;
@@ -120,9 +137,10 @@ void Drone::updateDatabase(const std::unordered_map<int, std::shared_ptr<Drone>>
         query << "UPDATE drone SET "
               << "status = CASE";
 
+        // Aggiorna lo stato di ciascun drone
         for (const auto& pair : drones) {
             const auto& drone = pair.second;
-            if (drone) { // Check if the pointer is not null
+            if (drone) { // Controlla se il puntatore non è nullo
                 query << " WHEN drone_id = 'drone_" << drone->droneId << "' THEN '" << drone->status << "'";
             }
         }
@@ -130,6 +148,7 @@ void Drone::updateDatabase(const std::unordered_map<int, std::shared_ptr<Drone>>
         query << " ELSE status END, "
               << "battery_seconds = CASE";
 
+        // Aggiorna la batteria di ciascun drone
         for (const auto& pair : drones) {
             const auto& drone = pair.second;
             if (drone) {
@@ -140,6 +159,7 @@ void Drone::updateDatabase(const std::unordered_map<int, std::shared_ptr<Drone>>
         query << " ELSE battery_seconds END, "
               << "pos_x = CASE";
 
+        // Aggiorna la posizione X di ciascun drone
         for (const auto& pair : drones) {
             const auto& drone = pair.second;
             if (drone) {
@@ -150,6 +170,7 @@ void Drone::updateDatabase(const std::unordered_map<int, std::shared_ptr<Drone>>
         query << " ELSE pos_x END, "
               << "pos_y = CASE";
 
+        // Aggiorna la posizione Y di ciascun drone
         for (const auto& pair : drones) {
             const auto& drone = pair.second;
             if (drone) {
@@ -160,6 +181,7 @@ void Drone::updateDatabase(const std::unordered_map<int, std::shared_ptr<Drone>>
         query << " ELSE pos_y END, "
               << "log_time = CASE";
 
+        // Aggiorna il timestamp dell'ultima modifica per ciascun drone
         for (const auto& pair : drones) {
             const auto& drone = pair.second;
             if (drone) {
@@ -172,6 +194,7 @@ void Drone::updateDatabase(const std::unordered_map<int, std::shared_ptr<Drone>>
 
         bool first = true;
 
+        // Specifica quali droni devono essere aggiornati
         for (const auto& pair : drones) {
             const auto& drone = pair.second;
             if (drone) {
@@ -185,27 +208,27 @@ void Drone::updateDatabase(const std::unordered_map<int, std::shared_ptr<Drone>>
 
         query << ");";
 
+        // Esegue la query di aggiornamento
         PGresult* res = PQexec(conn, query.str().c_str());
         if (PQresultStatus(res) != PGRES_COMMAND_OK) {
             std::cerr << "UPDATE failed: " << PQerrorMessage(conn) << std::endl;
         }
-        if (res) PQclear(res);  
+        if (res) PQclear(res); // Libera la memoria del risultato della query
     }
-    PQfinish(conn);
+    PQfinish(conn); // Chiude la connessione al database
 }
 
-
-
+// Metodo per creare un nuovo drone
 void Drone::createNewDrone() {
     int id = nextId++;
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(1, 10);
-    int life = dis(gen);
+    std::uniform_int_distribution<> dis(1, 5);
+    int life = dis(gen); // Genera una durata di vita casuale per il drone
     auto newDrone = std::make_shared<Drone>(id, life);
-    drones[id] = newDrone;
+    drones[id] = newDrone; // Aggiunge il nuovo drone alla mappa
 
-    idle++;
+    idle++; // Incrementa il conteggio dei droni in stato idle
 
     // Connessione al database
     PGconn* conn = PQconnectdb("dbname=dronelogdb user=droneuser password=dronepassword hostaddr=127.0.0.1 port=5432");
@@ -221,31 +244,35 @@ void Drone::createNewDrone() {
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         std::cerr << "INSERT INTO drone failed: " << PQerrorMessage(conn) << std::endl;
     }
-    if (res) PQclear(res);
-    PQfinish(conn);
+    if (res) PQclear(res); // Libera la memoria del risultato della query
+    PQfinish(conn); // Chiude la connessione al database
+
+    // Avvia i thread per il nuovo drone
     newDrone->startThreads();
-    std::cout<<"Crated new drone with id: " << id << " , life: " << life << std::endl;
+    std::cout << "Created new drone with id: " << id << " , life: " << life << std::endl;
 }
 
+// Metodo per riparare un drone rotto
 void Drone::repair() {
-    std::this_thread::sleep_for(std::chrono::seconds(10));
-    this->batterySeconds = 1800000;
+    std::this_thread::sleep_for(std::chrono::seconds(10)); // Aspetta 10 secondi prima di iniziare la riparazione
+    this->batterySeconds = 1800000; // Ripristina la batteria
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> minutes_dist(3, 5);
-    int minutes = minutes_dist(gen);
-    std::cout<<"Started repairing drone: " << this->droneId << " extimated time: " << minutes << " minutes"<<std::endl;
-    std::this_thread::sleep_for(std::chrono::minutes(minutes));
-    std::uniform_int_distribution<> life_dist(1, 10);
-    broken--;
-    idle++;
-    this->life = life_dist(gen);
-    this->posX = 3.0;
+    int minutes = minutes_dist(gen); // Genera un tempo di riparazione casuale
+    std::cout << "Started repairing drone: " << this->droneId << " estimated time: " << minutes << " minutes" << std::endl;
+    std::this_thread::sleep_for(std::chrono::minutes(minutes)); // Aspetta il tempo necessario per la riparazione
+    std::uniform_int_distribution<> life_dist(1, 5);
+    broken--; // Decrementa il conteggio dei droni rotti
+    idle++; // Incrementa il conteggio dei droni in stato idle
+    this->life = life_dist(gen); // Genera una nuova durata di vita per il drone
+    this->posX = 3.0; // Ripristina la posizione del drone
     this->posY = 3.0;
-    this->status = "idle";
-    std::cout<<"Finished repairing drone: " << this->droneId << " new life: " << this->life << std::endl;
+    this->status = "idle"; // Cambia lo stato del drone a idle
+    std::cout << "Finished repairing drone: " << this->droneId << " new life: " << this->life << std::endl;
 }
 
+// Metodo per inviare lo stato corrente dei droni a Redis
 void Drone::sendStatus() {
     while (true) {
         for (const auto& pair : drones) {
@@ -291,6 +318,7 @@ void Drone::sendStatus() {
     }
 }
 
+// Metodo per ricevere istruzioni da Redis
 void Drone::receiveInstruction() {
     redisContext* context = redisConnect("127.0.0.1", 6379);
     char channel[] = "instruction_channel";
@@ -383,6 +411,7 @@ void Drone::receiveInstruction() {
     if (context) redisFree(context);
 }
 
+// Metodo per seguire le istruzioni ricevute
 void Drone::followInstruction(const std::string& id_str, const std::string& type, const std::string& data, int routeId) {
     if (id_str != "drone_" + std::to_string(droneId)) {
         return; // L'istruzione non è per questo drone
@@ -453,6 +482,7 @@ void Drone::followInstruction(const std::string& id_str, const std::string& type
     }
 }
 
+// Metodo per muovere il drone verso una destinazione specifica
 void Drone::moveToDestination(double x, double y) {
     double visibility = 0.01 * weather;
     std::round(visibility * 1000.0) / 1000.0;
@@ -509,6 +539,7 @@ void Drone::moveToDestination(double x, double y) {
     }
 }
 
+// Metodo per seguire una rotta specificata
 void Drone::followRoute(const std::vector<std::pair<double, double>>& route) {
     if (this->status == "in_mission") {
         //std::cout << "drone_" << droneId << " starting to follow the route." << std::endl;
@@ -523,33 +554,34 @@ void Drone::followRoute(const std::vector<std::pair<double, double>>& route) {
     }
 }
 
+// Metodo per ricaricare il drone
 void Drone::recharge() {
     std::random_device rd;
     std::mt19937 gen(rd());
-    // Set the distribution to a range between 2 hours (7200 seconds) and 3 hours (10800 seconds)
-    std::uniform_int_distribution<> dis(7200000, 10800000); // milliseconds
+    // Imposta la distribuzione in un intervallo tra 2 ore (7200 secondi) e 3 ore (10800 secondi)
+    std::uniform_int_distribution<> dis(7200000, 10800000); // millisecondi
 
-    int rechargeMilliseconds = dis(gen);
+    int rechargeMilliseconds = dis(gen); // Genera un tempo di ricarica casuale
 
     std::string drone_id_m = "drone_" + std::to_string(droneId);
     std::string message = drone_id_m + " recharging for " + std::to_string(rechargeMilliseconds / 1000) + " seconds";
     // std::cout << message << std::endl;
 
     while (rechargeMilliseconds > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1)); // Aspetta 1 millisecondo
         rechargeMilliseconds--;
         if (rechargeMilliseconds % 60000 == 0 && rechargeMilliseconds > 0) {
             // std::cout << drone_id_m << " recharging, time left: " << rechargeMilliseconds / 60000 << " minutes." << std::endl;
         }
     }
-    this->batterySeconds = 1800000; // Reset the battery to 1800 seconds
-    this->status = "idle";
+    this->batterySeconds = 1800000; // Ripristina la batteria a 1800 secondi
+    this->status = "idle"; // Cambia lo stato del drone a idle
     idle++;
     charging--;
     // std::cout << "Recharged. Battery seconds: " << batterySeconds / 1000 << "s" << std::endl;
 }
 
-
+// Metodo per calcolare la distanza tra il drone e una destinazione specifica
 double Drone::distanceTo(double x, double y) {
-    return sqrt(pow(x - posX, 2) + pow(y - posY, 2));
+    return sqrt(pow(x - posX, 2) + pow(y - posY, 2)); // Usa il teorema di Pitagora per calcolare la distanza
 }
