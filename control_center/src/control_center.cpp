@@ -282,7 +282,7 @@ void ControlCenter::receiveStatus() {
 
                 updateDroneStatus(droneId, status, batterySeconds, posX, posY);
 
-                if (c == 500000) {
+                if (c == 900000) {
                     printMap(droneStatuses);
                     c = 0;
                 }
@@ -402,7 +402,7 @@ void ControlCenter::printMap(const std::unordered_map<std::string, std::tuple<st
         return extractDroneNumber(a.first) < extractDroneNumber(b.first);
     });
 
-    std::cout << "--------------------DRONE STATUSES-------------------------" << std::endl;
+    std::cout << "\n\n--------------------DRONE STATUSES-------------------------" << std::endl;
     for (const auto& pair : vec) {
         const std::string& status = std::get<0>(pair.second);
         int batterySeconds = std::get<1>(pair.second);
@@ -411,6 +411,6 @@ void ControlCenter::printMap(const std::unordered_map<std::string, std::tuple<st
 
         std::cout << pair.first << ": " << status << ", Battery: " << batterySeconds << "s, Position: (" << posX << ", " << posY << ")" << std::endl;
     }
-    std::cout << "-----------------------------------------------------------\n" << std::endl;
+    std::cout << "-----------------------------------------------------------\n\n" << std::endl;
 }
     
