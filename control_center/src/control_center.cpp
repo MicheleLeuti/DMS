@@ -66,7 +66,7 @@ void ControlCenter::sendInstructions(const std::vector<std::tuple<int, std::pair
 
         std::cout << "Finished sending routes\n" << std::endl;
         c = 298000 - c * 50 - 10000;
-        std::this_thread::sleep_for(std::chrono::milliseconds(30000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(c));
     }
 
     PQfinish(conn);
