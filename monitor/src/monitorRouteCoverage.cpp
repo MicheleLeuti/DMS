@@ -57,7 +57,7 @@ void MonitorRouteCoverage::run() {
         const char* checkRoutesQuery = R"(
             SELECT pos_x, pos_y, visited_time 
             FROM routes 
-            WHERE visited = true AND visited_time < (NOW() - INTERVAL '5 minutes');
+            WHERE visited = true AND visited_time < (NOW() - INTERVAL '10 minutes');
         )";
 
         PGresult* res = PQexec(conn, checkRoutesQuery);
