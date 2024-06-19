@@ -283,7 +283,7 @@ void ControlCenter::receiveStatus() {
                 updateDroneStatus(droneId, status, batterySeconds, posX, posY);
 
                 if (c == 900000) {
-                    printMap(droneStatuses);
+                    //printMap(droneStatuses);
                     c = 0;
                 }
 
